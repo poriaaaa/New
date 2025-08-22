@@ -1,45 +1,253 @@
 import requests
 from bs4 import BeautifulSoup
-import telebot
-import time
 import asyncio
+from telegram import Bot
+from telegram.error import TelegramError
+import json
+import os
 from datetime import datetime
 import logging
 
+# تنظیم لاگ
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
 # --------------------------
-# توکن ربات تلگرام و چت‌آی‌دی رو اینجا وارد کن:
-TELEGRAM_BOT_TOKEN = "8306283242:AAFXKM2507eI5pUd0Y3TyAVOow1SMj6LC8E"   # توکن ربات از BotFather
-CHAT_ID = "1456594312"  # آی‌دی عددی خودت یا گروه
+# تنظیمات - این مقادیر را تغییر دهید
+TELEGRAM_BOT_TOKEN = "YOUR_BOT_TOKEN_HERE"  # توکن از BotFather
+CHAT_ID = "YOUR_CHAT_ID_HERE"               # آی‌دی عددی خودت
 # --------------------------
 
-# لیست سایت‌های خبری
-NEWS_SOURCES = [
-    "https://www.iranintl.com/",
-    "https://www.bbc.com/persian",
-    "https://www.haaretz.com/",
-    "https://13tv.co.il/",
-    "https://m.n12.co.il/",
-    "https://www.irna.ir/",
-    "https://farsnews.ir/showcase"
-]
+# لیست سایت‌های خبری با تنظیمات مخصوص
+NEWS_SOURCES = {
+    "ایران اینترنشنال": {
+        "url": "https://www.iranintl.com/",
+        "selectors": ["h1", "h2", ".title", ".headline"]
+    },
+    "بی‌بی‌سی فارسی": {
+        "url": "https://www.bbc.com/persian",
+        "selectors": ["h1", "h2", ".media__title", ".title-link__title-text"]
+    },
+    "هاآرتص": {
+        "url": "https://www.haaretz.com/",
+        "selectors": ["h1", "h2", ".headline", ".title"]
+    },
+    "کانال 13": {
+        "url": "https://13tv.co.il/",
+        "selectors": ["h1", "h2", ".title"]
+    },
+    "n12": {
+        "url": "https://m.n12.co.il/",
+        "selectors": ["h1", "h2", ".article-title"]
+    },
+    "ایرنا": {
+        "url": "https://www.irna.ir/",
+        "selectors": ["h1", "h2", ".title", ".news-title"]
+    },
+    "فارس نیوز": {
+        "url": "https://farsnews.ir/showcase",
+        "selectors": ["h1", "h2", ".title", ".news-title"]
+    }
+}
+
+# فایل ذخیره خبرهای ارسال‌شده
+SENT_NEWS_FILE = "sent_news.json"
+
+# headers برای درخواست‌ها
+HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+    'Accept-Language': 'fa,en-US;q=0.5',
+    'Accept-Encoding': 'gzip, deflate',
+    'Connection': 'keep-alive',
+}
+
+def load_sent_news():
+    """بارگذاری خبرهای ارسال‌شده از فایل"""
+    if os.path.exists(SENT_NEWS_FILE):
+        try:
+            with open(SENT_NEWS_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception as e:
+            logger.error(f"خطا در بارگذاری فایل sent_news: {e}")
+    return {}
+
+def save_sent_news(sent_news):
+    """ذخیره خبرهای ارسال‌شده در فایل"""
+    try:
+        with open(SENT_NEWS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(sent_news, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logger.error(f"خطا در ذخیره فایل sent_news: {e}")
+
+# بارگذاری خبرهای قبلی
+sent_news = load_sent_news()
 
 # ربات تلگرام
-bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
+bot = Bot(token=TELEGRAM_BOT_TOKEN)
 
-# ذخیره آخرین خبرهای ارسال‌شده
-last_sent = {}
-
-def get_news(url):
+def get_news_from_site(site_name, site_config):
+    """استخراج اخبار از یک سایت"""
     try:
-        r = requests.get(url, timeout=10)
-        soup = BeautifulSoup(r.text, "html.parser")
-        titles = [t.get_text().strip() for t in soup.find_all("h2")][:5]
+        logger.info(f"در حال بررسی {site_name}...")
+        
+        response = requests.get(
+            site_config["url"], 
+            headers=HEADERS, 
+            timeout=15
+        )
+        response.raise_for_status()
+        
+        soup = BeautifulSoup(response.text, "html.parser")
+        titles = []
+        
+        # جستجو با selector های مختلف
+        for selector in site_config["selectors"]:
+            elements = soup.select(selector)
+            for element in elements:
+                title = element.get_text().strip()
+                
+                # فیلتر کردن عناوین معقول
+                if (50 <= len(title) <= 200 and 
+                    title not in titles and
+                    not title.lower().startswith(('تبلیغات', 'اعلان', 'advertisement'))):
+                    titles.append(title)
+                    
+                # حداکثر 3 خبر از هر سایت
+                if len(titles) >= 3:
+                    break
+            
+            if len(titles) >= 3:
+                break
+        
+        logger.info(f"از {site_name} تعداد {len(titles)} خبر پیدا شد")
         return titles
+        
+    except requests.RequestException as e:
+        logger.error(f"خطای درخواست برای {site_name}: {e}")
+        return []
     except Exception as e:
-        print(f"❌ خطا در خواندن {url}: {e}")
+        logger.error(f"خطای عمومی برای {site_name}: {e}")
         return []
 
 async def send_message_safe(text):
+    """ارسال پیام با مدیریت خطا"""
+    try:
+        # محدود کردن طول پیام
+        if len(text) > 4000:
+            text = text[:3950] + "\n\n... [متن کوتاه شده]"
+            
+        await bot.send_message(
+            chat_id=CHAT_ID, 
+            text=text, 
+            parse_mode='HTML',
+            disable_web_page_preview=True
+        )
+        logger.info("پیام ارسال شد")
+        return True
+        
+    except TelegramError as e:
+        logger.error(f"خطای تلگرام: {e}")
+        return False
+    except Exception as e:
+        logger.error(f"خطای ارسال پیام: {e}")
+        return False
+
+async def check_and_send_news():
+    """بررسی و ارسال اخبار جدید"""
+    global sent_news
+    new_news_count = 0
+    
+    for site_name, site_config in NEWS_SOURCES.items():
+        try:
+            titles = get_news_from_site(site_name, site_config)
+            
+            # بررسی خبرهای جدید
+            for title in titles:
+                if title not in sent_news.get(site_name, []):
+                    # پیام خبر
+                    message = f"""📰 <b>خبر جدید</b>
+
+🌐 <b>منبع:</b> {site_name}
+📄 <b>عنوان:</b> {title}
+
+⏰ <b>زمان:</b> {datetime.now().strftime('%Y/%m/%d - %H:%M')}
+
+🔗 <b>سایت:</b> {site_config['url']}"""
+
+                    if await send_message_safe(message):
+                        # ثبت خبر ارسال شده
+                        if site_name not in sent_news:
+                            sent_news[site_name] = []
+                        sent_news[site_name].append(title)
+                        new_news_count += 1
+                        
+                        # فاصله بین پیام‌ها
+                        await asyncio.sleep(3)
+            
+            # محدود کردن تعداد خبرهای ذخیره شده (حداکثر 50 خبر از هر سایت)
+            if site_name in sent_news and len(sent_news[site_name]) > 50:
+                sent_news[site_name] = sent_news[site_name][-30:]
+                
+        except Exception as e:
+            logger.error(f"خطا در پردازش {site_name}: {e}")
+    
+    # ذخیره خبرهای ارسال شده
+    if new_news_count > 0:
+        save_sent_news(sent_news)
+        logger.info(f"تعداد {new_news_count} خبر جدید ارسال شد")
+    else:
+        logger.info("خبر جدیدی پیدا نشد")
+
+async def test_bot():
+    """تست اتصال ربات"""
+    try:
+        bot_info = await bot.get_me()
+        logger.info(f"ربات متصل شد: @{bot_info.username}")
+        
+        await send_message_safe("🤖 ربات خبری شروع به کار کرد!")
+        return True
+    except Exception as e:
+        logger.error(f"خطا در تست ربات: {e}")
+        return False
+
+async def main_loop():
+    """حلقه اصلی اجرا"""
+    logger.info("🚀 شروع ربات خبری...")
+    
+    # تست اتصال
+    if not await test_bot():
+        logger.error("❌ اتصال ربات ناموفق - لطفاً توکن و chat_id را بررسی کنید")
+        return
+    
+    # حلقه اصلی
+    while True:
+        try:
+            logger.info(f"⏰ شروع چک اخبار: {datetime.now().strftime('%Y/%m/%d - %H:%M:%S')}")
+            await check_and_send_news()
+            
+            logger.info("😴 استراحت 5 دقیقه‌ای...")
+            await asyncio.sleep(300)  # 5 دقیقه
+            
+        except KeyboardInterrupt:
+            logger.info("🛑 ربات توسط کاربر متوقف شد")
+            break
+        except Exception as e:
+            logger.error(f"❌ خطای کلی: {e}")
+            await asyncio.sleep(60)  # در صورت خطا، یک دقیقه صبر کن
+
+if __name__ == "__main__":
+    # بررسی تنظیمات
+    if TELEGRAM_BOT_TOKEN == "YOUR_BOT_TOKEN_HERE" or CHAT_ID == "YOUR_CHAT_ID_HERE":
+        print("❌ لطفاً ابتدا TELEGRAM_BOT_TOKEN و CHAT_ID را در کد تنظیم کنید!")
+        exit(1)
+    
+    try:
+        asyncio.run(main_loop())
+    except KeyboardInterrupt:
+        print("\n🛑 ربات متوقف شد")
+    except Exception as e:
+        print(f"❌ خطای اجرا: {e}")async def send_message_safe(text):
     """ارسال پیام با مدیریت خطا"""
     try:
         # محدود کردن طول پیام (تلگرام حداکثر 4096 کاراکتر)
