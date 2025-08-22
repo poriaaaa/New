@@ -2,7 +2,9 @@ import requests
 from bs4 import BeautifulSoup
 import telebot
 import time
+import asyncio
 from datetime import datetime
+import logging
 
 # --------------------------
 # توکن ربات تلگرام و چت‌آی‌دی رو اینجا وارد کن:
@@ -34,6 +36,40 @@ def get_news(url):
         titles = [t.get_text().strip() for t in soup.find_all("h2")][:5]
         return titles
     except Exception as e:
+        print(f"❌ خطا در خواندن {url}: {e}")
+        return []
+
+async def send_message_safe(text):
+    """ارسال پیام با مدیریت خطا"""
+    try:
+        # محدود کردن طول پیام (تلگرام حداکثر 4096 کاراکتر)
+        if len(text) > 4000:
+            text = text[:3950] + "\n\n... [متن کوتاه شده]"
+        await bot.send_message(chat_id=CHAT_ID, text=text, parse_mode='HTML')
+        print("✅ پیام ارسال شد")
+    except Exception as e:
+        print(f"❌ خطا در ارسال پیام: {e}")
+
+async def send_news():
+    """دریافت و ارسال اخبار"""
+    global last_sent
+    for site in NEWS_SOURCES:
+        titles = get_news(site)
+        for title in titles:
+            if title not in last_sent.get(site, []):
+                msg = f"📢 خبر جدید از {site}:\n\n{title}"
+                await send_message_safe(msg)
+                last_sent.setdefault(site, []).append(title)
+
+async def main_loop():
+    """حلقه اصلی اجرا هر 5 دقیقه"""
+    while True:
+        await send_news()
+        print("✅ چک شد:", datetime.now())
+        await asyncio.sleep(300)  # هر ۵ دقیقه
+
+if __name__ == "__main__":
+    asyncio.run(main_loop())
         print(f"❌ خطا در خواندن {url}: {e}")
         return []
 
