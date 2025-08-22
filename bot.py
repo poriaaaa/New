@@ -4,36 +4,70 @@ import telebot
 import time
 from datetime import datetime
 
-# تنظیمات
-BOT_TOKEN = "8306283242:AAFXKM2507eI5pUd0Y3TyAVOow1SMj6LC8E"
-CHAT_ID = "1456594312"
+# --------------------------
+# توکن ربات تلگرام و چت‌آی‌دی رو اینجا وارد کن:
+TELEGRAM_BOT_TOKEN = "8306283242:AAFXKM2507eI5pUd0Y3TyAVOow1SMj6LC8E"   # توکن ربات از BotFather
+CHAT_ID = "1456594312"  # آی‌دی عددی خودت یا گروه
+# --------------------------
 
-# سایت‌ها
-SITES = {
-    "ایران اینترنشنال": "https://www.iranintl.com/",
-    "بی‌بی‌سی": "https://www.bbc.com/persian",
-    "فارس": "https://farsnews.ir/"
-}
+# لیست سایت‌های خبری
+NEWS_SOURCES = [
+    "https://www.iranintl.com/",
+    "https://www.bbc.com/persian",
+    "https://www.haaretz.com/",
+    "https://13tv.co.il/",
+    "https://m.n12.co.il/",
+    "https://www.irna.ir/",
+    "https://farsnews.ir/showcase"
+]
 
-# ربات
-bot = telebot.TeleBot(BOT_TOKEN)
+# ربات تلگرام
+bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 
-# ذخیره خبرها
-sent_news = {}
+# ذخیره آخرین خبرهای ارسال‌شده
+last_sent = {}
 
-def get_news(site_name, url):
-    """گرفتن اخبار"""
+def get_news(url):
     try:
-        print(f"در حال بررسی {site_name}...")
-        
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
-        response = requests.get(url, headers=headers, timeout=10)
-        
-        soup = BeautifulSoup(response.text, "html.parser")
-        titles = []
-        
-        # پیدا کردن عناوین
-        for tag in ["h1", "h2", "h3"]:
+        r = requests.get(url, timeout=10)
+        soup = BeautifulSoup(r.text, "html.parser")
+        titles = [t.get_text().strip() for t in soup.find_all("h2")][:5]
+        return titles
+    except Exception as e:
+        print(f"❌ خطا در خواندن {url}: {e}")
+        return []
+
+async def send_message_safe(text):
+    """ارسال پیام با مدیریت خطا"""
+    try:
+        # محدود کردن طول پیام (تلگرام حداکثر 4096 کاراکتر)
+        if len(text) > 4000:
+            text = text[:3950] + "\n\n... [متن کوتاه شده]"
+        await bot.send_message(chat_id=CHAT_ID, text=text, parse_mode='HTML')
+        print("✅ پیام ارسال شد")
+    except Exception as e:
+        print(f"❌ خطا در ارسال پیام: {e}")
+
+async def send_news():
+    """دریافت و ارسال اخبار"""
+    global last_sent
+    for site in NEWS_SOURCES:
+        titles = get_news(site)
+        for title in titles:
+            if title not in last_sent.get(site, []):
+                msg = f"📢 خبر جدید از {site}:\n\n{title}"
+                await send_message_safe(msg)
+                last_sent.setdefault(site, []).append(title)
+
+async def main_loop():
+    """حلقه اصلی اجرا هر 5 دقیقه"""
+    while True:
+        await send_news()
+        print("✅ چک شد:", datetime.now())
+        await asyncio.sleep(300)  # هر ۵ دقیقه
+
+if __name__ == "__main__":
+    asyncio.run(main_loop())
             elements = soup.find_all(tag)
             for element in elements:
                 title = element.get_text().strip()
