@@ -1,39 +1,60 @@
-import asyncio
-import feedparser
-import datetime
-import os
-from telegram import Bot
-from telegram.error import TelegramError
-from newspaper import Article
-from telethon import TelegramClient, events
-import logging
+import requests
+from bs4 import BeautifulSoup
+import telebot
+import time
+from datetime import datetime
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-logger = logging.getLogger(__name__)
+# --------------------------
+# توکن ربات تلگرام و چت‌آی‌دی رو اینجا وارد کن:
+TELEGRAM_BOT_TOKEN = "8306283242:AAFXKM2507eI5pUd0Y3TyAVOow1SMj6LC8E"   # توکن ربات از BotFather
+CHAT_ID = "1456594312"  # آی‌دی عددی خودت یا گروه
+# --------------------------
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")
-API_ID = int(os.getenv("API_ID", "0"))
-API_HASH = os.getenv("API_HASH")
-PHONE = os.getenv("PHONE")
-CHANNELS = os.getenv("CHANNELS", "").split(",")
-
-RSS_FEEDS = [
-    "https://www.iranintl.com/feed",
-    "https://www.bbc.com/persian/index.xml",
-    "https://www.irna.ir/rss",
+# لیست سایت‌های خبری
+NEWS_SOURCES = [
+    "https://www.iranintl.com/",
+    "https://www.bbc.com/persian",
+    "https://www.haaretz.com/",
+    "https://13tv.co.il/",
+    "https://m.n12.co.il/",
+    "https://www.irna.ir/",
+    "https://farsnews.ir/showcase"
 ]
 
-bot = Bot(token=BOT_TOKEN)
+# ربات تلگرام
+bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 
-def summarize_article(url):
+# ذخیره آخرین خبرهای ارسال‌شده
+last_sent = {}
+
+def get_news(url):
     try:
-        article = Article(url, language="fa")
-        article.download()
-        article.parse()
-        article.nlp()
-        return article.summary[:500] if article.summary else "خلاصه در دسترس نیست"
-    except Exception:
+        r = requests.get(url, timeout=10)
+        soup = BeautifulSoup(r.text, "html.parser")
+        titles = [t.get_text().strip() for t in soup.find_all("h2")][:5]
+        return titles
+    except Exception as e:
+        print(f"❌ خطا در خواندن {url}: {e}")
+        return []
+
+def send_news():
+    global last_sent
+    for site in NEWS_SOURCES:
+        titles = get_news(site)
+        for title in titles:
+            if title not in last_sent.get(site, []):
+                bot.send_message(CHAT_ID, f"📢 خبر جدید از {site}:\n\n{title}")
+                last_sent.setdefault(site, []).append(title)
+
+# اجرای همیشگی
+def main_loop():
+    while True:
+        send_news()
+        print("✅ چک شد:", datetime.now())
+        time.sleep(300)  # هر ۵ دقیقه
+
+if __name__ == "__main__":
+    main_loop()
         return "خلاصه در دسترس نیست"
 
 async def send_message_safe(text):
