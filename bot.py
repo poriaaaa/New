@@ -5,9 +5,9 @@ import time
 from datetime import datetime
 
 # --------------------------
-# توکن ربات تلگرام و چت‌آی‌دی رو اینجا وارد کن:
-TELEGRAM_BOT_TOKEN = "8306283242:AAFXKM2507eI5pUd0Y3TyAVOow1SMj6LC8E"   # توکن ربات از BotFather
-CHAT_ID = "1456594312"  # آی‌دی عددی خودت یا گروه
+# توکن ربات تلگرام و چت‌آی‌دی
+TELEGRAM_BOT_TOKEN = "8306283242:AAFXKM2507eI5pUd0Y3TyAVOow1SMj6LC8E"
+CHAT_ID = "1456594312"
 # --------------------------
 
 # لیست سایت‌های خبری
@@ -34,6 +34,27 @@ def get_news(url):
         titles = [t.get_text().strip() for t in soup.find_all("h2")][:5]
         return titles
     except Exception as e:
+        print(f"❌ خطا در خواندن {url}: {e}")
+        return []
+
+def send_news():
+    global last_sent
+    for site in NEWS_SOURCES:
+        titles = get_news(site)
+        for title in titles:
+            if title not in last_sent.get(site, []):
+                bot.send_message(CHAT_ID, f"📢 خبر جدید از {site}:\n\n{title}")
+                last_sent.setdefault(site, []).append(title)
+
+# اجرای همیشگی
+def main_loop():
+    while True:
+        send_news()
+        print("✅ چک شد:", datetime.now())
+        time.sleep(300)  # هر ۵ دقیقه
+
+if __name__ == "__main__":
+    main_loop()
         print(f"❌ خطا در خواندن {url}: {e}")
         return []
 
