@@ -1,40 +1,135 @@
 import requests
 from bs4 import BeautifulSoup
-import asyncio
-from telegram import Bot
-from telegram.error import TelegramError
-import json
-import os
+import telebot
+import time
 from datetime import datetime
-import logging
 
-# تنظیم لاگ
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
+# تنظیمات
+BOT_TOKEN = "8306283242:AAFXKM2507eI5pUd0Y3TyAVOow1SMj6LC8E"
+CHAT_ID = "1456594312"
 
-# --------------------------
-# تنظیمات - این مقادیر را تغییر دهید
-TELEGRAM_BOT_TOKEN = "YOUR_BOT_TOKEN_HERE"  # توکن از BotFather
-CHAT_ID = "YOUR_CHAT_ID_HERE"               # آی‌دی عددی خودت
-# --------------------------
+# سایت‌ها
+SITES = {
+    "ایران اینترنشنال": "https://www.iranintl.com/",
+    "بی‌بی‌سی": "https://www.bbc.com/persian",
+    "فارس": "https://farsnews.ir/"
+}
 
-# لیست سایت‌های خبری با تنظیمات مخصوص
-NEWS_SOURCES = {
-    "ایران اینترنشنال": {
-        "url": "https://www.iranintl.com/",
-        "selectors": ["h1", "h2", ".title", ".headline"]
-    },
-    "بی‌بی‌سی فارسی": {
-        "url": "https://www.bbc.com/persian",
-        "selectors": ["h1", "h2", ".media__title", ".title-link__title-text"]
-    },
-    "هاآرتص": {
-        "url": "https://www.haaretz.com/",
-        "selectors": ["h1", "h2", ".headline", ".title"]
-    },
-    "کانال 13": {
-        "url": "https://13tv.co.il/",
-        "selectors": ["h1", "h2", ".title"]
+# ربات
+bot = telebot.TeleBot(BOT_TOKEN)
+
+# ذخیره خبرها
+sent_news = {}
+
+def get_news(site_name, url):
+    """گرفتن اخبار"""
+    try:
+        print(f"در حال بررسی {site_name}...")
+        
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+        response = requests.get(url, headers=headers, timeout=10)
+        
+        soup = BeautifulSoup(response.text, "html.parser")
+        titles = []
+        
+        # پیدا کردن عناوین
+        for tag in ["h1", "h2", "h3"]:
+            elements = soup.find_all(tag)
+            for element in elements:
+                title = element.get_text().strip()
+                if 20 < len(title) < 150:
+                    titles.append(title)
+                if len(titles) >= 3:
+                    break
+            if len(titles) >= 3:
+                break
+        
+        print(f"پیدا شد: {len(titles)} خبر از {site_name}")
+        return titles
+        
+    except Exception as e:
+        print(f"خطا در {site_name}: {e}")
+        return []
+
+def send_message(text):
+    """ارسال پیام"""
+    try:
+        if len(text) > 4000:
+            text = text[:3950] + "..."
+        
+        bot.send_message(chat_id=CHAT_ID, text=text)
+        print("✅ پیام ارسال شد")
+        return True
+        
+    except Exception as e:
+        print(f"خطای ارسال: {e}")
+        return False
+
+def main():
+    """تابع اصلی"""
+    global sent_news
+    
+    print("🚀 ربات خبری شروع شد")
+    
+    # تست ربات
+    try:
+        me = bot.get_me()
+        print(f"ربات: @{me.username}")
+        send_message("🤖 ربات خبری آماده!")
+    except Exception as e:
+        print(f"خطا: {e}")
+        return
+    
+    # حلقه اصلی
+    while True:
+        try:
+            print(f"\n🔍 شروع چک: {datetime.now().strftime('%H:%M')}")
+            
+            new_count = 0
+            for site_name, url in SITES.items():
+                titles = get_news(site_name, url)
+                
+                for title in titles:
+                    if title not in sent_news.get(site_name, []):
+                        # پیام خبر
+                        message = f"""📰 خبر جدید
+
+🌐 منبع: {site_name}
+📝 {title}
+
+🕐 {datetime.now().strftime('%H:%M')}
+🔗 {url}"""
+                        
+                        if send_message(message):
+                            # ذخیره خبر
+                            if site_name not in sent_news:
+                                sent_news[site_name] = []
+                            sent_news[site_name].append(title)
+                            new_count += 1
+                            
+                            time.sleep(3)
+                
+                # محدود کردن ذخیره
+                if site_name in sent_news and len(sent_news[site_name]) > 15:
+                    sent_news[site_name] = sent_news[site_name][-10:]
+            
+            if new_count > 0:
+                print(f"📊 {new_count} خبر جدید ارسال شد")
+            else:
+                print("📊 خبر جدیدی نبود")
+            
+            print("😴 استراحت 5 دقیقه...")
+            time.sleep(300)
+            
+        except KeyboardInterrupt:
+            print("\n🛑 ربات متوقف شد")
+            break
+        except Exception as e:
+            print(f"خطای کلی: {e}")
+            time.sleep(60)
+
+if __name__ == "__main__":
+    main()        "selectors": ["h1", "h2", ".title"]
     },
     "n12": {
         "url": "https://m.n12.co.il/",
